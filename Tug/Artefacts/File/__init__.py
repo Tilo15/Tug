@@ -35,8 +35,8 @@ class File(Artefacts.Artefact):
         file_checksum = stream.read(32)
 
         refs = []
-        for(i in range(ref_count)):
-            refs.append(Reference.deserialise(stream.read(40))
+        for i in range(ref_count):
+            refs.append(Reference.deserialise(stream.read(40)))
 
         return File(refs, file_checksum)
         

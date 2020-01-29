@@ -1,5 +1,6 @@
 import Tug.Storage as Storage
 from Tug.Artefacts.Factory import ArtefactFactory
+from Tug.Util import Checksum
 
 import os
 
@@ -41,15 +42,15 @@ class Filesystem(Storage.Storage):
 
     def has_artefact(self, checksum):
         # Check if we have an artefact
-        return any(os.path.exists(os.path.join(x, checksum)) for x in self.path_types.values())
+        return any(os.path.exists(os.path.join(x, Checksum.stringify(checksum))) for x in self.path_types.values())
 
     def get_storage_type(self, checksum):
         # Get the storage type
-        return next(key for key, value in self.path_types.items() if os.path.exists(os.path.join(value, checksum)))
+        return next(key for key, value in self.path_types.items() if os.path.exists(os.path.join(value, Checksum.stringify(checksum))))
 
     def get_artefact(self, checksum, expected_size = 0):
         # Get the artefact path
-        path = next(path for path in (os.path.join(x, checksum) for x in self.path_types.values()) if os.path.exists(path))
+        path = next(path for path in (os.path.join(x, Checksum.stringify(checksum)) for x in self.path_types.values()) if os.path.exists(path))
 
         # Get atrefact stream
         stream = open(path, "rb")
@@ -59,13 +60,13 @@ class Filesystem(Storage.Storage):
 
     def save_artefact(self, storage_type, artefact):
         # Get path for artefact
-        path = os.path.join(self.path_types[storage_type], artefact.checksum)
+        path = os.path.join(self.path_types[storage_type], Checksum.stringify(artefact.checksum))
 
         # Get stream to save to
         stream = open(path, "wb")
 
         # Write path artefact to stream
-        for(data in artefact.as_sendable()):
+        for data in artefact.as_sendable():
             stream.write(data)
 
         stream.close()
@@ -75,4 +76,4 @@ class Filesystem(Storage.Storage):
         storage_type = self.get_storage_type(checksum)
 
         # Remove from disk
-        os.remove(os.path.join(self.path_types[storage_type], checksum))
+        os.remove(os.path.join(self.path_types[storage_type], Checksum.stringify(checksum)))

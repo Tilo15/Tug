@@ -16,7 +16,9 @@ class Map(Artefacts.Artefact):
         hasher = hashlib.sha256()
         hasher.update(self._get_send_stream().read())
 
-        super().__init__(Artefacts.ARTEFACT_MAP, self._get_send_stream, sum(x.get_size() for x in self.destinations), hasher.digest())
+        size = sum(x.get_size() for x in self.destinations)
+
+        super().__init__(Artefacts.ARTEFACT_MAP, self._get_send_stream, size, hasher.digest())
 
 
     def _get_send_stream(self):

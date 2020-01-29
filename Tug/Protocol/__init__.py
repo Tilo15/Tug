@@ -1,12 +1,12 @@
-from Tug.Storage import Storage
+from Tug import Storage
 from Tug.Protocol.Channel import Channel
 from Tug.Artefacts.Factory import ArtefactFactory
+from Tug.Util import Checksum
 
 from LibPeer.Application import Application
 from LibPeer.Interfaces.DSI import DSI
 from LibPeer.Interfaces.SODI import SODI
 
-import base64
 import uuid
 import random
 import rx
@@ -14,7 +14,7 @@ import rx
 
 class Protocol:
     
-    def __init__(self, store: Storage):
+    def __init__(self, store: Storage.Storage):
         # Keep reference to storage object
         self.store = store
 
@@ -39,7 +39,7 @@ class Protocol:
 
     def handle_solicitation(self, solicitation):
         # Get checksum from solicitation
-        checksum = base64.urlsafe_b64decode(solicitation + "=")
+        checksum = Checksum.parse(solicitation.query)
 
         # Solicitation string contains hash of artefact
         has_artefact = self.store.has_artefact(checksum)
@@ -92,15 +92,32 @@ class Protocol:
         return dsi
 
     
-    def retrieve_artefact(self, checksum, peers_to_try = 10):
+    def retrieve_artefact(self, checksum, storage_policy = Storage.STORAGE_PARTICIPATORY, peers_to_try = 10):
+        # Create the subject to give to the caller
+        subject = rx.subjects.ReplaySubject()
+
+        # Do we already have the artefact in storage?
+        if(self.store.has_artefact(checksum)):
+            # Return that instead
+            try:
+                subject.on_next(self.store.get_artefact(checksum))
+            except Exception as e:
+                subject.on_error(e)
+                
+            return subject
+
         # Find peers claiming to have the artefact
         discoveries = self.application.find_peers_with_label(checksum)
+
+        if(len(discoveries) == 0):
+            # If there were no discoveries, return the subject with an error
+            subject.on_error(Exception("No peers found advertising themselves as having the requested artefact"))
+            return subject
 
         # Pick random peers to solicit
         random.shuffle(discoveries)
         discoveries = discoveries[:peers_to_try]
 
-        subject = rx.subjects.ReplaySubject()
         got_response = False
         responses = 0
 
@@ -108,29 +125,40 @@ class Protocol:
             # Increment responses
             responses += 1
 
-            # Get object from reply
-            obj = reply.get_object()
+            try:
+                # Get object from reply
+                obj = reply.get_object()
 
-            # Peer replied after another peer or doesn't have the object
-            if(got_response or not obj["has_artefact"]):
-                # Have we had the number of responses we sent?
-                if(responses == peers_to_try):
-                    subject.on_error(Exception("All peers tried could not deliver artefact"))
-                
-                # Stop execution
-                return
+                # Peer replied after another peer or doesn't have the object
+                if(got_response or not obj["has_artefact"]):
+                    # Have we had the number of responses we sent?
+                    if(responses == peers_to_try):
+                        subject.on_error(Exception("All peers tried could not deliver artefact"))
+                    
+                    # Stop execution
+                    return
 
-            # We have our response
-            got_response = True
+                # We have our response
+                got_response = True
 
-            # Get a DSI to get the artefact from
-            dsi = self.get_dsi(obj["find_at_channel"])
+                # Get a DSI to get the artefact from
+                dsi = self.get_dsi(obj["find_at_channel"])
 
-            # Connect to the peer at this channel
-            connection = dsi.connect(reply.peer)
+                # Connect to the peer at this channel
+                connection = dsi.connect(reply.peer)
 
-            # Create an artefact
-            artefact = ArtefactFactory.deserialise(connection)
+                # Create an artefact
+                artefact = ArtefactFactory.deserialise(connection)
+
+                # Save the artefact
+                self.store.save_artefact(storage_policy, artefact)
+
+                # Return the artefact to the subject
+                subject.on_next(artefact)
+
+            except Exception as e:
+                subject.on_error(e)
+
 
         def handle_error(exception):
             # Increment responses
@@ -143,10 +171,7 @@ class Protocol:
         # Loop over each peer
         for discovery in discoveries:
             # Solicit the peer
-            self.sodi.solicit(discovery.peer, base64.urlsafe_b64encode(checksum)[:-1]).subscribe(handle_reply, handle_error)
-
-        # If there were no discoveries, start with an error
-        subject.on_error(Exception("No peers found advertising themselves as having the requested artefact"))
+            self.sodi.solicit(discovery.peer, Checksum.stringify(checksum)).subscribe(handle_reply, handle_error)
 
         # Return the subject
         return subject

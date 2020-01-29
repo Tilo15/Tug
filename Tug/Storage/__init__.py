@@ -9,7 +9,7 @@ class Storage:
     def has_artefact(self, checksum):
         raise NotImplementedError
 
-    def get_storage_type(self, checksum)
+    def get_storage_type(self, checksum):
         raise NotImplementedError
 
     def get_artefact(self, checksum, expected_size = 0):

@@ -21,7 +21,7 @@ class Sendable:
         self.read = len(self.head)
 
         if(self.body is Sendable):
-            for(chunk in self.body):
+            for chunk in self.body:
                 yield chunk
                 self.body_read += len(chunk)
                 self.read += len(chunk)

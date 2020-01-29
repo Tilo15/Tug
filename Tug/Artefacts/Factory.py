@@ -16,7 +16,7 @@ class ArtefactFactory:
     }
 
     @staticmethod
-    def deserialise(self, stream, expected_size = 0):
+    def deserialise(stream, expected_size = 0):
         # Make sure we have a valid artefact
         identifier = stream.read(len(Artefacts.MAGIC_NUMBER))
 
