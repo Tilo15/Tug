@@ -93,6 +93,9 @@ class Protocol:
 
     
     def retrieve_artefact(self, checksum, storage_policy = Storage.STORAGE_PARTICIPATORY, peers_to_try = 10):
+        # TODO Remove
+        print("Retreive {}".format(Checksum.stringify(checksum)))
+
         # Create the subject to give to the caller
         subject = rx.subjects.ReplaySubject()
 

@@ -17,7 +17,7 @@ class File(Artefacts.Artefact):
         hasher.update(self._get_send_stream().read())
 
         # Each reference serialises to 40 bytes
-        super().__init__(Artefacts.ARTEFACT_FILE, self._get_send_stream, 4 + len(self.blob_refs) * 40, hasher.digest())
+        super().__init__(Artefacts.ARTEFACT_FILE, self._get_send_stream, 32 + len(self.blob_refs) * 40, hasher.digest())
 
     def _get_send_stream(self):
         return io.BytesIO(self.file_checksum + b"".join((x.serialise() for x in self.blob_refs)))
@@ -26,10 +26,10 @@ class File(Artefacts.Artefact):
     def build(checksum, size, stream):
         # Get number of blob refs
         ref_size = size - 32
-        ref_count = ref_size / 40
+        ref_count = int(ref_size / 40)
 
         if(ref_size % 40 != 0):
-            raise IOError("File artefact invalid size")
+           raise IOError("File artefact invalid size")
 
         # Get file checksum
         file_checksum = stream.read(32)

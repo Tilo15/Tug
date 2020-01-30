@@ -7,7 +7,7 @@ class Destination:
     VALID_DESTINATIONS = [Artefacts.ARTEFACT_KEY, Artefacts.ARTEFACT_MAP, Artefacts.ARTEFACT_FILE]
 
     def __init__(self, name, reference_type, reference):
-        if(reference_type not in VALID_DESTINATIONS):
+        if(reference_type not in Destination.VALID_DESTINATIONS):
             raise ValueError("Reference type not a valid type for a destination")
         
         self.name = name
@@ -22,7 +22,7 @@ class Destination:
         return len(self.name.encode("UTF-8")) + 42
 
     @staticmethod
-    def deserialise(self, stream):
+    def deserialise(stream):
         size = struct.unpack("!B", stream.read(1))[0]
         name = stream.read(size).decode("UTF-8")
         reference_type = stream.read(1)

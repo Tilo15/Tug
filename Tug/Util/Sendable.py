@@ -27,7 +27,7 @@ class Sendable:
                 self.read += len(chunk)
 
         else:
-            while(self.body_read < self.read):
+            while(self.body_read < self.body_size):
                 chunk = self.body.read(BODY_CHUNK_SIZE)
                 yield chunk
                 self.body_read += len(chunk)

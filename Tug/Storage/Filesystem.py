@@ -56,7 +56,7 @@ class Filesystem(Storage.Storage):
         stream = open(path, "rb")
 
         # Return artefact
-        ArtefactFactory.deserialise(stream, expected_size)
+        return ArtefactFactory.deserialise(stream, expected_size)
 
     def save_artefact(self, storage_type, artefact):
         # Get path for artefact

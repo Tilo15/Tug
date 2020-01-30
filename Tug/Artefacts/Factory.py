@@ -26,7 +26,7 @@ class ArtefactFactory:
         # Read the header
         header = stream.read(41)
 
-        artefact_type = header[1]
+        artefact_type = header[0:1]
         checksum = header[1:33]
         size = struct.unpack("!Q", header[33:])[0]
 

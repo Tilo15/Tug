@@ -22,7 +22,7 @@ class Map(Artefacts.Artefact):
 
 
     def _get_send_stream(self):
-        return io.BytesIO(b"".join(x.serialise for x in self.destinations))
+        return io.BytesIO(b"".join(x.serialise() for x in self.destinations))
 
     @staticmethod
     def build(checksum, size, stream):
@@ -32,15 +32,15 @@ class Map(Artefacts.Artefact):
         data_read = 0
         while(data_read < size):
             # Read the destination, and get the data read and object back
-            size, destination = Destination.deserialise(stream)
+            read_size, destination = Destination.deserialise(stream)
 
             # Add to data read
-            data_read += size
+            data_read += read_size
 
             # Add to destinations
             destinations.append(destination)
 
         # Create the object
-        artefact = Map(destinations)
+        return Map(destinations)
 
             
