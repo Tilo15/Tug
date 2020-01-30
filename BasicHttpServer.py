@@ -74,7 +74,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
 
             if(blob_queue.qsize() > 0):
                 ref = blob_queue.get()
-                protocol.retrieve_artefact(ref.checksum, ref.size).subscribe(write_blob, self.error)
+                protocol.retrieve_artefact(ref.checksum).subscribe(write_blob, self.error)
             else:
                 self.done = True
         
@@ -82,7 +82,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.end_headers()
 
         ref = blob_queue.get()
-        protocol.retrieve_artefact(ref.checksum, ref.size).subscribe(write_blob, self.error)
+        protocol.retrieve_artefact(ref.checksum).subscribe(write_blob, self.error)
 
 
     def handle_blob(self, artefact: Blob):
