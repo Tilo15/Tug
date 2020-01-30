@@ -117,7 +117,8 @@ class Protocol:
             return subject
 
         # Find peers claiming to have the artefact
-        discoveries = self.application.find_peers_with_label(checksum)
+        #discoveries = self.application.find_peers_with_label(checksum)
+        discoveries = self.application.find_peers()
 
         if(len(discoveries) == 0):
             # If there were no discoveries, return the subject with an error
@@ -132,6 +133,9 @@ class Protocol:
         responses = 0
 
         def handle_reply(reply):
+            nonlocal responses
+            nonlocal got_response
+            nonlocal subject
             # Increment responses
             responses += 1
 
@@ -171,6 +175,9 @@ class Protocol:
 
 
         def handle_error(exception):
+            nonlocal responses
+            nonlocal got_response
+            nonlocal subject
             # Increment responses
             responses += 1
 
