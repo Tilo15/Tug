@@ -16,8 +16,11 @@ class Channel:
         # Also keep the UUID
         self.uuid = uuid
 
-        # Instansiate the DSI object
-        self.dsi = DSI(app, uuid.bytes)
+        try:
+            # Instansiate the DSI object
+            self.dsi = DSI(application, uuid)
+        except Exception as e:
+            print(e)
 
         # Save a timestamp of when this channel was created
         self.timestamp = time.time()
