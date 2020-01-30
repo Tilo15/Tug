@@ -77,3 +77,8 @@ class Filesystem(Storage.Storage):
 
         # Remove from disk
         os.remove(os.path.join(self.path_types[storage_type], Checksum.stringify(checksum)))
+
+    def get_artefact_checksums(self):
+        yield from (Checksum.parse(x) for x in os.listdir(self.mirror_path))
+        yield from (Checksum.parse(x) for x in os.listdir(self.assistive_path))
+        yield from (Checksum.parse(x) for x in os.listdir(self.participatory_path))

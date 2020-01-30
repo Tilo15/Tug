@@ -10,6 +10,7 @@ from LibPeer.Interfaces.SODI import SODI
 import uuid
 import random
 import rx
+import base64
 
 
 class Protocol:
@@ -20,9 +21,6 @@ class Protocol:
 
         # Initialise the LibPeer application
         self.application = Application("tug")
-
-        # Make this instance discoverable
-        self.application.set_discoverable(True)
 
         # SODI instance on default channel
         self.sodi = SODI(self.application)
@@ -35,6 +33,15 @@ class Protocol:
 
         # Download channels
         self.dsis = {}
+
+        # Advertise initial artefact checksums we offer
+        for checksum in self.store.get_artefact_checksums():
+            print("Added label for {}".format(Checksum.stringify(checksum)))
+            # Advertise with label
+            #self.application.add_label(checksum)
+
+        # Make this instance discoverable
+        self.application.set_discoverable(True)
         
 
     def handle_solicitation(self, solicitation):
@@ -55,7 +62,7 @@ class Protocol:
         # Reply to the solicitation
         solicitation.reply({
             "has_artefact": has_artefact,
-            "find_at_channel": find_at_channel
+            "find_at_channel": base64.b64encode(find_at_channel)
         })
 
 
@@ -149,7 +156,7 @@ class Protocol:
                 got_response = True
 
                 # Get a DSI to get the artefact from
-                dsi = self.get_dsi(obj["find_at_channel"])
+                dsi = self.get_dsi(base64.b64decode(obj["find_at_channel"]))
 
                 # Connect to the peer at this channel
                 connection = dsi.connect(reply.peer)

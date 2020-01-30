@@ -20,3 +20,6 @@ class Storage:
 
     def remove_artefact(self, checksum):
         raise NotImplementedError
+
+    def get_artefact_checksums(self):
+        raise NotImplementedError
