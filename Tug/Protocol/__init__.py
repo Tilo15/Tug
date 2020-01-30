@@ -157,7 +157,6 @@ class Protocol:
                 got_response = True
 
                 def get_it():
-                    nonlocal dsi
                     nonlocal subject
 
                     # Get a DSI to get the artefact from
