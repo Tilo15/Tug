@@ -11,6 +11,7 @@ import uuid
 import random
 import rx
 import base64
+import threading
 
 
 class Protocol:
@@ -155,20 +156,27 @@ class Protocol:
                 # We have our response
                 got_response = True
 
-                # Get a DSI to get the artefact from
-                dsi = self.get_dsi(base64.b64decode(obj["find_at_channel"]))
+                def get_it():
+                    nonlocal dsi
+                    nonlocal subject
 
-                # Connect to the peer at this channel
-                connection = dsi.connect(reply.peer)
+                    # Get a DSI to get the artefact from
+                    dsi = self.get_dsi(base64.b64decode(obj["find_at_channel"]))
 
-                # Create an artefact
-                artefact = ArtefactFactory.deserialise(connection)
+                    # Connect to the peer at this channel
+                    connection = dsi.connect(reply.peer)
 
-                # Save the artefact
-                self.store.save_artefact(storage_policy, artefact)
+                    # Create an artefact
+                    artefact = ArtefactFactory.deserialise(connection)
 
-                # Return the artefact to the subject
-                subject.on_next(artefact)
+                    # Save the artefact
+                    self.store.save_artefact(storage_policy, artefact)
+
+                    # Return the artefact to the subject
+                    subject.on_next(artefact)
+
+                threading.Thread(target=get_it).start()
+                
 
             except Exception as e:
                 subject.on_error(e)
