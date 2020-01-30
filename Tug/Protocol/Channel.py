@@ -16,11 +16,11 @@ class Channel:
         # Also keep the UUID
         self.uuid = uuid
 
-        try:
-            # Instansiate the DSI object
-            self.dsi = DSI(application, uuid)
-        except Exception as e:
-            print(e)
+        # Instansiate the DSI object
+        self.dsi = DSI(application, uuid)
+
+        # Subscribe to new connections
+        self.dsi.new_connection.subscribe(self.handle_connection)
 
         # Save a timestamp of when this channel was created
         self.timestamp = time.time()
