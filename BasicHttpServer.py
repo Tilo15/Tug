@@ -17,9 +17,14 @@ protocol = Protocol(store)
 class BasicHttpServer(BaseHTTPRequestHandler):
 
     def do_GET(self):
+        self.done = False
+
         # Attempt to get the artefact
         subject = protocol.retrieve_artefact(Checksum.parse(self.path[1:]))
         subject.subscribe(self.got_artefact, self.error)
+
+        while not self.done:
+            pass
 
     def got_artefact(self, artefact):
         if(isinstance(artefact, Blob)):
@@ -35,6 +40,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
             self.handle_key(artefact)
 
     def handle_key(self, artefact: Key):
+        self.done = True
         pass
 
     def handle_map(self, artefact: Map):
@@ -54,6 +60,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         html += """</ul>"""
         self.wfile.write(html.encode("utf-8"))
         self.wfile.flush()
+        self.done = True
 
     def handle_file(self, artefact: File):
 
@@ -68,6 +75,8 @@ class BasicHttpServer(BaseHTTPRequestHandler):
             if(blob_queue.qsize() > 0):
                 ref = blob_queue.get()
                 protocol.retrieve_artefact(ref.checksum, ref.size).subscribe(write_blob, self.error)
+            else:
+                self.done = True
         
         self.send_response(200)
         self.end_headers()
@@ -81,9 +90,11 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(artefact.blob_data_stream().read())
         self.wfile.flush()
+        self.done = True
 
     def error(self, exception):
         self.send_error(404, "Could not retreive artefact '{}'".format(self.path[1:]), str(exception))
+        self.done = True
 
 
 httpd = HTTPServer(('localhost', 8080), BasicHttpServer)
