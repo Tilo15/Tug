@@ -137,6 +137,7 @@ class Protocol:
             nonlocal responses
             nonlocal got_response
             nonlocal subject
+            nonlocal storage_policy
             # Increment responses
             responses += 1
 
@@ -158,6 +159,7 @@ class Protocol:
 
                 def get_it():
                     nonlocal subject
+                    nonlocal storage_policy
 
                     # Get a DSI to get the artefact from
                     dsi = self.get_dsi(base64.b64decode(obj["find_at_channel"]))
