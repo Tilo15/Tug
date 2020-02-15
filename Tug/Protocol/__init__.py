@@ -27,14 +27,17 @@ class Protocol:
 
         # Advertise initial artefact checksums we offer
         for checksum in self.store.get_artefact_checksums():
-            print("Added label for {}".format(Checksum.stringify(checksum)))
             # Advertise with label
             self.manager.resources.add(checksum)
+        
+        print("Added checksums to resources")
         
 
     def handle_stream(self, stream):
         # Read the checksum from the stream
         checksum = stream.read(32)
+
+        print("Received request for artefact {}".format(Checksum.stringify(checksum)))
 
         # Check if we have the artefact
         has_artefact = self.store.has_artefact(checksum)
@@ -46,6 +49,8 @@ class Protocol:
 
 
     def handle_reply_stream(self, stream, checksum):
+        print("Established reply stream for artefact {}".format(Checksum.stringify(checksum)))
+
         # Get the object
         artefact = self.store.get_artefact(checksum)
 
@@ -80,6 +85,8 @@ class Protocol:
         def on_peer_reply(stream):
             nonlocal subject
             nonlocal storage_policy
+
+            print("Reading data from resource peer")
             try:
                 # Create an artefact
                 artefact = ArtefactFactory.deserialise(stream)
@@ -95,6 +102,7 @@ class Protocol:
 
         # Callback for when a stream has been established with a resource peer
         def on_stream_established(stream):
+            print("Established connection with resource peer")
             # Subscribe to the stream reply
             stream.reply.subscribe(on_peer_reply)
 
@@ -104,6 +112,7 @@ class Protocol:
 
         # Callback for when resource peers have been contacted
         def on_resource_peer(peer):
+            print("Discovered resource peer")
             # Establish a stream with the peer
             self.manager.establish_stream(peer).subscribe(on_stream_established)
 
