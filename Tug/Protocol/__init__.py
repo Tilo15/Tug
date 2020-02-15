@@ -86,7 +86,7 @@ class Protocol:
         print("Established reply stream for artefact listing")
 
         # Get list of checksums
-        checksums = self.store.get_artefact_checksums()
+        checksums = list(self.store.get_artefact_checksums())
 
         # Send checksum count
         stream.write(struct.pack("!H", len(checksums)))
