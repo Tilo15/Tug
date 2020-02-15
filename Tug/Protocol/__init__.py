@@ -12,12 +12,21 @@ import base64
 import threading
 import struct
 
+REQUEST_ARTEFACT = b"\x01"
+REQUEST_LISTING = b"\x02"
+
 
 class Protocol:
     
     def __init__(self, store: Storage.Storage):
         # Keep reference to storage object
         self.store = store
+
+        # Keep an artefact location cache
+        self.artefact_locations = {}
+
+        # Keep track of what peers we hit the most
+        self.peer_hits = {}
 
         # Initialise the LibPeer application
         self.manager = InstanceManager("tug")
@@ -34,18 +43,27 @@ class Protocol:
         
 
     def handle_stream(self, stream):
-        # Read the checksum from the stream
-        checksum = stream.read(32)
+        # Read the request type
+        request = stream.read(1)
 
-        print("Received request for artefact {}".format(Checksum.stringify(checksum)))
+        if(request == REQUEST_ARTEFACT):
+            # Read the checksum from the stream
+            checksum = stream.read(32)
 
-        # Check if we have the artefact
-        has_artefact = self.store.has_artefact(checksum)
+            print("Received request for artefact {}".format(Checksum.stringify(checksum)))
 
-        # Do we have the artefact?
-        if(has_artefact):
-            # Yes, request a stream
-            self.manager.establish_stream(stream.origin, in_reply_to=stream.id)
+            # Check if we have the artefact
+            has_artefact = self.store.has_artefact(checksum)
+
+            # Do we have the artefact?
+            if(has_artefact):
+                # Yes, request a stream
+                self.manager.establish_stream(stream.origin, in_reply_to=stream.id).subscribe(lambda x: self.handle_reply_stream(x, checksum))
+
+        elif(request == REQUEST_LISTING):
+            print("Received request for artefact listing")
+            # Open a reply
+            self.manager.establish_stream(stream.origin, in_reply_to=stream.id).subscribe(self.handle_listing_stream)
 
 
     def handle_reply_stream(self, stream, checksum):
@@ -59,8 +77,23 @@ class Protocol:
 
         # Send the artefact
         for chunk in sendable:
-            stream.write(chunk)
+            if(len(chunk) > 0):
+                stream.write(chunk)
 
+        stream.close()
+
+
+    def handle_listing_stream(self, stream):
+        print("Established reply stream for artefact listing")
+
+        # Get list of checksums
+        checksums = self.store.get_artefact_checksums()
+
+        # Send checksum count
+        stream.write(struct.pack("!H", len(checksums)))
+
+        # Send checksums
+        stream.write(b"".join(checksums))
         stream.close()
 
     
@@ -107,21 +140,61 @@ class Protocol:
             stream.reply.subscribe(on_peer_reply)
 
             # Ask the peer for the artefact
-            stream.write(checksum)
+            stream.write(REQUEST_ARTEFACT + checksum)
             stream.close()
 
         # Callback for when resource peers have been contacted
-        def on_resource_peer(peer):
+        def on_resource_peer(peer, from_cache = False):
             print("Discovered resource peer")
             # Establish a stream with the peer
             self.manager.establish_stream(peer).subscribe(on_stream_established)
 
-        # Find peers claiming to have the artefact
-        self.manager.find_resource_peers(checksum).subscribe(on_resource_peer)
+            # Have we hit this peer 4 times already?
+            if(self.hit_peer(peer) == 4):
+                self.request_peer_artefact_listing(peer)
+
+        # Do we already know peers with this artefact?
+        if(checksum in self.artefact_locations):
+            # Try directly
+            for peer in self.artefact_locations[checksum]:
+                on_resource_peer(peer)
+
+        else:
+            # Find peers claiming to have the artefact
+            self.manager.find_resource_peers(checksum).subscribe(on_resource_peer)
 
         return subject
 
 
+    def add_artefact_peer(self, checksum, peer):
+        if(checksum not in self.artefact_locations):
+            self.artefact_locations[checksum] = set()
 
-        
+        self.artefact_locations[checksum].add(peer)
+
+
+    def request_peer_artefact_listing(self, peer):
+
+        def on_reply(stream):
+            # Read number of items
+            items = struct.unpack("!H", stream.read(2))[0]
+
+            # Add artefact peer
+            for i in range(items):
+                self.add_artefact_peer(stream.read(32))
+
+        def on_stream(stream):
+            stream.reply.subscribe(on_reply)
+            stream.write(REQUEST_LISTING)
+            stream.close()
+
+        self.manager.establish_stream(peer).subscribe(on_stream)
+
+
+    def hit_peer(self, peer):
+        if(peer not in self.peer_hits):
+            self.peer_hits[peer] = 0
+
+        self.peer_hits[peer] += 1
+        return self.peer_hits
         
