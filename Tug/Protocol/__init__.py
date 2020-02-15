@@ -1,5 +1,4 @@
 from Tug import Storage
-from Tug.Protocol.Channel import Channel
 from Tug.Artefacts.Factory import ArtefactFactory
 from Tug.Util import Checksum
 
@@ -155,11 +154,13 @@ class Protocol:
 
         # Do we already know peers with this artefact?
         if(checksum in self.artefact_locations):
+            print("Found peer with {} from cache".format(Checksum.stringify(checksum)))
             # Try directly
             for peer in self.artefact_locations[checksum]:
                 on_resource_peer(peer)
 
         else:
+            print("Searching for peer with {}".format(Checksum.stringify(checksum)))
             # Find peers claiming to have the artefact
             self.manager.find_resource_peers(checksum).subscribe(on_resource_peer)
 
@@ -174,8 +175,9 @@ class Protocol:
 
 
     def request_peer_artefact_listing(self, peer):
-
+        print("Request peer artefact listing")
         def on_reply(stream):
+            print("Reading artefact listing")
             # Read number of items
             items = struct.unpack("!H", stream.read(2))[0]
 
@@ -184,6 +186,7 @@ class Protocol:
                 self.add_artefact_peer(stream.read(32))
 
         def on_stream(stream):
+            print("Stream established for listing request")
             stream.reply.subscribe(on_reply)
             stream.write(REQUEST_LISTING)
             stream.close()
