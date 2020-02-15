@@ -3,15 +3,14 @@ from Tug.Protocol.Channel import Channel
 from Tug.Artefacts.Factory import ArtefactFactory
 from Tug.Util import Checksum
 
-from LibPeer.Application import Application
-from LibPeer.Interfaces.DSI import DSI
-from LibPeer.Interfaces.SODI import SODI
+from LibPeer2 import InstanceManager
 
 import uuid
 import random
 import rx
 import base64
 import threading
+import struct
 
 
 class Protocol:
@@ -21,83 +20,43 @@ class Protocol:
         self.store = store
 
         # Initialise the LibPeer application
-        self.application = Application("tug")
+        self.manager = InstanceManager("tug")
 
-        # SODI instance on default channel
-        self.sodi = SODI(self.application)
-
-        # Listen for solicitations
-        self.sodi.solicited.subscribe(self.handle_solicitation)
-
-        # Holds open channels
-        self.channels = {}
-
-        # Download channels
-        self.dsis = {}
+        # Listen for streams
+        self.manager.new_stream.subscribe(self.handle_stream)
 
         # Advertise initial artefact checksums we offer
         for checksum in self.store.get_artefact_checksums():
             print("Added label for {}".format(Checksum.stringify(checksum)))
             # Advertise with label
-            #self.application.add_label(checksum)
-
-        # Make this instance discoverable
-        self.application.set_discoverable(True)
+            self.manager.resources.add(checksum)
         
 
-    def handle_solicitation(self, solicitation):
-        # Get checksum from solicitation
-        checksum = Checksum.parse(solicitation.query)
+    def handle_stream(self, stream):
+        # Read the checksum from the stream
+        checksum = stream.read(32)
 
-        # Solicitation string contains hash of artefact
+        # Check if we have the artefact
         has_artefact = self.store.has_artefact(checksum)
-
-        # What channel at this peer to connect to in order to receive the artefact
-        find_at_channel = None
 
         # Do we have the artefact?
         if(has_artefact):
-            # Get the channel identifier
-            find_at_channel = self.get_channel(checksum).uuid
-
-        # Reply to the solicitation
-        solicitation.reply({
-            "has_artefact": has_artefact,
-            "find_at_channel": base64.b64encode(find_at_channel)
-        })
+            # Yes, request a stream
+            self.manager.establish_stream(stream.origin, in_reply_to=stream.id)
 
 
-    def get_channel(self, checksum):
-        # Do we already have a channel open for this artefact?
-        if(checksum in self.channels):
-            return self.channels[checksum]
+    def handle_reply_stream(self, stream, checksum):
+        # Get the object
+        artefact = self.store.get_artefact(checksum)
 
-        # Create a channel id
-        channel_id = uuid.uuid4().bytes
+        # Get a sendable
+        sendable = artefact.as_sendable()
 
-        # Create the channel
-        channel = Channel(channel_id, self.store.get_artefact(checksum), self.application)
+        # Send the artefact
+        for chunk in sendable:
+            stream.write(chunk)
 
-        # Save the channel
-        self.channels[checksum] = channel
-
-        # Return the channel
-        return channel
-
-
-    def get_dsi(self, uuid):
-        # Do we already have a download channel for this artefact?
-        if(uuid in self.dsis):
-            return self.dsis[uuid]
-
-        # Create the data stream interface
-        dsi = DSI(self.application, uuid)
-
-        # Save DSI
-        self.dsis[uuid] = dsi
-
-        # Return DSI
-        return dsi
+        stream.close()
 
     
     def retrieve_artefact(self, checksum, storage_policy = Storage.STORAGE_PARTICIPATORY, peers_to_try = 10):
@@ -117,93 +76,41 @@ class Protocol:
                 
             return subject
 
-        # Find peers claiming to have the artefact
-        #discoveries = self.application.find_peers_with_label(checksum)
-        discoveries = self.application.find_peers()
-
-        if(len(discoveries) == 0):
-            # If there were no discoveries, return the subject with an error
-            subject.on_error(Exception("No peers found advertising themselves as having the requested artefact"))
-            return subject
-
-        # Pick random peers to solicit
-        random.shuffle(discoveries)
-        discoveries = discoveries[:peers_to_try]
-
-        got_response = False
-        responses = 0
-
-        def handle_reply(reply):
-            nonlocal responses
-            nonlocal got_response
+        # Callback for when a peer replies to the request
+        def on_peer_reply(stream):
             nonlocal subject
             nonlocal storage_policy
-            # Increment responses
-            responses += 1
-
             try:
-                # Get object from reply
-                obj = reply.get_object()
+                # Create an artefact
+                artefact = ArtefactFactory.deserialise(stream)
 
-                # Peer replied after another peer or doesn't have the object
-                if(got_response or not obj["has_artefact"]):
-                    # Have we had the number of responses we sent?
-                    if(responses == peers_to_try):
-                        subject.on_error(Exception("All peers tried could not deliver artefact"))
-                    
-                    # Stop execution
-                    return
+                # Save the artefact
+                self.store.save_artefact(storage_policy, artefact)
 
-                # We have our response
-                got_response = True
-
-                def get_it():
-                    nonlocal subject
-                    nonlocal storage_policy
-
-                    # Get a DSI to get the artefact from
-                    dsi = self.get_dsi(base64.b64decode(obj["find_at_channel"]))
-
-                    # Connect to the peer at this channel
-                    connection = dsi.connect(reply.peer)
-
-                    # Create an artefact
-                    artefact = ArtefactFactory.deserialise(connection)
-
-                    # Save the artefact
-                    self.store.save_artefact(storage_policy, artefact)
-
-                    # Return the artefact to the subject
-                    subject.on_next(artefact)
-
-                threading.Thread(target=get_it).start()
+                # Return the artefact to the subject
+                subject.on_next(artefact)
                 
-
             except Exception as e:
                 subject.on_error(e)
 
+        # Callback for when a stream has been established with a resource peer
+        def on_stream_established(stream):
+            # Subscribe to the stream reply
+            stream.reply.subscribe(on_peer_reply)
 
-        def handle_error(exception):
-            nonlocal responses
-            nonlocal got_response
-            nonlocal subject
-            # Increment responses
-            responses += 1
+            # Ask the peer for the artefact
+            stream.write(checksum)
+            stream.close()
 
-            # Have we had the number of responses we sent?
-            if(responses == peers_to_try):
-                    subject.on_error(Exception("All peers tried could not deliver artefact"))
+        # Callback for when resource peers have been contacted
+        def on_resource_peer(peer):
+            # Establish a stream with the peer
+            self.manager.establish_stream(peer).subscribe(on_stream_established)
 
-        # Loop over each peer
-        for discovery in discoveries:
-            # Solicit the peer
-            self.sodi.solicit(discovery.peer, Checksum.stringify(checksum)).subscribe(handle_reply, handle_error)
+        # Find peers claiming to have the artefact
+        self.manager.find_resource_peers(checksum).subscribe(on_resource_peer)
 
-        # Return the subject
         return subject
-
-
-        
 
 
 
