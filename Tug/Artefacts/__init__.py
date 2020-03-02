@@ -24,3 +24,6 @@ class Artefact:
 
     def as_sendable(self):
         return Sendable(self.get_header(), self.get_data_stream(), self.size)
+
+    def get_related(self):
+        raise NotImplementedError()

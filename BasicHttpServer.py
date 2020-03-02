@@ -10,14 +10,18 @@ from http.server import HTTPServer
 from http.server import BaseHTTPRequestHandler
 
 import queue
+import sys
 
-store = Filesystem("store")
+store = Filesystem(sys.argv[1])
 protocol = Protocol(store)
 
 class BasicHttpServer(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self.done = False
+
+        if(self.path == "/favicon.ico"):
+            return
 
         # Attempt to get the artefact
         subject = protocol.retrieve_artefact(Checksum.parse(self.path[1:]))
@@ -97,5 +101,5 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.done = True
 
 
-httpd = HTTPServer(('localhost', 8080), BasicHttpServer)
+httpd = HTTPServer(('localhost', int(sys.argv[2])), BasicHttpServer)
 httpd.serve_forever()

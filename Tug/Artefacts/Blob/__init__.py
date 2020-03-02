@@ -19,4 +19,9 @@ class Blob(Artefacts.Artefact):
         hasher.update(data)
 
         return Blob(lambda: io.BytesIO(data), size, checksum)
+
+    
+    def get_related(self):
+        # This is a blob and does not have any related artefacts
+        return []
         

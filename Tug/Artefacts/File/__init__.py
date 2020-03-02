@@ -39,4 +39,8 @@ class File(Artefacts.Artefact):
             refs.append(Reference.deserialise(stream.read(40)))
 
         return File(refs, file_checksum)
+
+    
+    def get_related(self):
+        return list(self.blob_refs)
         

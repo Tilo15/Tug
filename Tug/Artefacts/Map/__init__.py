@@ -43,4 +43,8 @@ class Map(Artefacts.Artefact):
         # Create the object
         return Map(destinations)
 
+
+    def get_related(self):
+        return [x.reference for x in self.destinations]
+
             

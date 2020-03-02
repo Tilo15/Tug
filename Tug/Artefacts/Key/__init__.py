@@ -68,6 +68,10 @@ class Key(Artefacts.Artefact):
         return Key(reference, serial_number, name, message)
 
 
+    def get_related(self):
+        return [self.reference,]
+
+
 
 
 
