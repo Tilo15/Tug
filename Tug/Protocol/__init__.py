@@ -6,7 +6,7 @@ from LibPeer2 import InstanceManager
 
 import uuid
 import random
-import rx
+import rx.subject
 import base64
 import threading
 import struct
@@ -142,7 +142,7 @@ class Protocol:
         self.artefact_policy[checksum] = storage_policy
 
         # Create the subject to give to the caller
-        subject = rx.subjects.ReplaySubject()
+        subject = rx.subject.ReplaySubject()
 
         # Do we already have the artefact in storage?
         if(self.store.has_artefact(checksum)):

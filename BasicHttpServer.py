@@ -24,7 +24,10 @@ class BasicHttpServer(BaseHTTPRequestHandler):
             return
 
         # Attempt to get the artefact
-        subject = protocol.retrieve_artefact(Checksum.parse(self.path[1:]))
+        self.path_parts = self.path.split("/")[1:]
+        self.path_parts.reverse()
+        part = self.path_parts.pop()
+        subject = protocol.retrieve_artefact(Checksum.parse(part))
         subject.subscribe(self.got_artefact, self.error)
 
         while not self.done:
@@ -48,6 +51,17 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         pass
 
     def handle_map(self, artefact: Map):
+        if(len(self.path_parts) > 0):
+            part = self.path_parts.pop()
+            for entry in artefact.destinations:
+                if(entry.name == part):
+                    subject = protocol.retrieve_artefact(entry.reference.checksum)
+                    subject.subscribe(self.got_artefact, self.error)
+                    return
+            
+            self.error(Exception("A map was retrieved however the subpath '{}' could not be found".format(part)))
+            return
+
         self.send_response(200)
         self.end_headers()
         html = """
