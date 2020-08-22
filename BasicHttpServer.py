@@ -1,4 +1,4 @@
-from Tug.Protocol import Protocol
+from Tug.Application import Tug
 from Tug.Storage.Filesystem import Filesystem
 from Tug.Util import Checksum
 from Tug.Artefacts.Blob import Blob
@@ -13,7 +13,7 @@ import queue
 import sys
 
 store = Filesystem(sys.argv[1])
-protocol = Protocol(store)
+tug = Tug(store)
 
 class BasicHttpServer(BaseHTTPRequestHandler):
 
@@ -27,7 +27,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.path_parts = self.path.split("/")[1:]
         self.path_parts.reverse()
         part = self.path_parts.pop()
-        subject = protocol.retrieve_artefact(Checksum.parse(part))
+        subject = tug.retrieve_artefact(Checksum.parse(part))
         subject.subscribe(self.got_artefact, self.error)
 
         while not self.done:
@@ -55,7 +55,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
             part = self.path_parts.pop()
             for entry in artefact.destinations:
                 if(entry.name == part):
-                    subject = protocol.retrieve_artefact(entry.reference.checksum)
+                    subject = tug.retrieve_artefact(entry.reference.checksum)
                     subject.subscribe(self.got_artefact, self.error)
                     return
             
@@ -81,26 +81,32 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.done = True
 
     def handle_file(self, artefact: File):
+        received_blobs = {}
+        next_blob_to_transmit = 0
+        blobs_to_receive = len(artefact.blob_refs)
+        blob_order = {artefact.blob_refs[i].checksum: i for i in range(len(artefact.blob_refs))}
 
-        blob_queue = queue.Queue()
-        for reference in artefact.blob_refs:
-            blob_queue.put(reference)
+        def handle_blob(blob: Blob):
+            nonlocal blobs_to_receive
+            nonlocal next_blob_to_transmit
+            
+            print(blob_order[blob.checksum], Checksum.stringify(blob.checksum))
+            received_blobs[blob_order[blob.checksum]] = blob
+            blobs_to_receive -= 1
 
-        def write_blob(blob: Blob):
-            self.wfile.write(blob.blob_data_stream().read())
-            self.wfile.flush()
+            while next_blob_to_transmit in received_blobs:
+                print("NBTT")
+                self.wfile.write(received_blobs[next_blob_to_transmit].blob_data_stream().read())
+                self.wfile.flush()
+                next_blob_to_transmit += 1
 
-            if(blob_queue.qsize() > 0):
-                ref = blob_queue.get()
-                protocol.retrieve_artefact(ref.checksum).subscribe(write_blob, self.error)
-            else:
+            print("DONE")
+
+            if(blobs_to_receive == 0):
                 self.done = True
-        
-        self.send_response(200)
-        self.end_headers()
 
-        ref = blob_queue.get()
-        protocol.retrieve_artefact(ref.checksum).subscribe(write_blob, self.error)
+        for reference in artefact.blob_refs:
+            tug.retrieve_artefact(reference.checksum).subscribe(handle_blob)
 
 
     def handle_blob(self, artefact: Blob):
@@ -114,6 +120,7 @@ class BasicHttpServer(BaseHTTPRequestHandler):
         self.send_error(404, "Could not retreive artefact '{}'".format(self.path[1:]), str(exception))
         self.done = True
 
-
+print("About to do it?")
 httpd = HTTPServer(('localhost', int(sys.argv[2])), BasicHttpServer)
+print("Serving at http://localhost:{}/".format(int(sys.argv[2])))
 httpd.serve_forever()

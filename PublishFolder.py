@@ -6,7 +6,7 @@ from Tug.Util import Checksum
 import os
 import sys
 
-file_system = Filesystem("store-music")
+file_system = Filesystem("store")
 
 def get_structure(path):
     structure = {}

@@ -2,6 +2,8 @@ import Tug.Storage as Storage
 from Tug.Artefacts.Factory import ArtefactFactory
 from Tug.Util import Checksum
 
+from multiprocessing import Process
+
 import os
 
 class Filesystem(Storage.Storage):
@@ -25,6 +27,11 @@ class Filesystem(Storage.Storage):
         self._create_path(self.participatory_path, True)
         self._create_path(self.assistive_path, False)
         self._create_path(self.mirror_path, False)
+
+        # Take inventory of the store
+        self.__artefact_checksums = set((Checksum.parse(x) for x in os.listdir(self.mirror_path)))
+        self.__artefact_checksums.update((Checksum.parse(x) for x in os.listdir(self.assistive_path)))
+        self.__artefact_checksums.update((Checksum.parse(x) for x in os.listdir(self.participatory_path)))
 
 
     def _create_path(self, path, delete):
@@ -69,16 +76,18 @@ class Filesystem(Storage.Storage):
         for data in artefact.as_sendable():
             stream.write(data)
 
+        self.__artefact_checksums.add(artefact.checksum)
+
         stream.close()
 
     def remove_artefact(self, checksum):
         # Get the artefact storage type
         storage_type = self.get_storage_type(checksum)
 
+        self.__artefact_checksums.remove(artefact.checksum)
+
         # Remove from disk
         os.remove(os.path.join(self.path_types[storage_type], Checksum.stringify(checksum)))
 
     def get_artefact_checksums(self):
-        yield from (Checksum.parse(x) for x in os.listdir(self.mirror_path))
-        yield from (Checksum.parse(x) for x in os.listdir(self.assistive_path))
-        yield from (Checksum.parse(x) for x in os.listdir(self.participatory_path))
+        return self.__artefact_checksums

@@ -1,261 +1,90 @@
 from Tug import Storage
-from Tug.Artefacts.Factory import ArtefactFactory
-from Tug.Util import Checksum
+from Tug.Protocol.Leacher import Leacher
+from Tug.Protocol.Seeder import Seeder
 
-from LibPeer2 import InstanceManager
+from rx.subject import Subject
+from typing import Dict
+from threading import Thread
 
-import uuid
-import random
-import rx.subject
-import base64
-import threading
-import struct
-
-REQUEST_ARTEFACT = b"\x01"
-REQUEST_RELATED_AVAILABLE = b"\x02"
-RESPONSE_ARTEFACT = b"\x01"
-RESPONSE_RELATED_AVAILABLE = b"\x02"
-
-
-def in_thread(func):
-    def threaded(*args):
-        threading.Thread(target=func, args=args).start()
-
-    return threaded
-
+import LibPeer2
 
 class Protocol:
     
-    def __init__(self, store: Storage.Storage):
+    def __init__(self, storage: Storage.Storage):
         # Keep reference to storage object
-        self.store = store
+        self.storage = storage
 
-        # Keep an artefact location cache
-        self.artefact_locations = {}
+        # Create a LibPeer instance manager
+        self.__instance_manager = LibPeer2.InstanceManager("net.unitatem.tug")
 
-        # Keep collection of active control streams
-        self.control_streams = {}
+        # Subscribe to new stream hook
+        self.__instance_manager.new_stream.subscribe(self.__handle_new_stream)
 
-        # Keep a collection of subjects related to artefacts
-        self.artefact_subjects = {}
+        # Subjects for new seeders and leachers
+        self.new_seeder = Subject()
+        self.new_leacher = Subject()
 
-        # Keep a map of storage policies for artefacts
-        self.artefact_policy = {}
-
-        # Initialise the LibPeer application
-        self.manager = InstanceManager("tug")
-
-        # Listen for streams
-        self.manager.new_stream.subscribe(self.handle_stream)
-
-        # Advertise initial artefact checksums we offer
-        for checksum in self.store.get_artefact_checksums():
-            # Advertise with label
-            self.manager.resources.add(checksum)
-        
-        print("Added checksums to resources")
-    
-    @in_thread
-    def handle_stream(self, stream):
-        # TODO cleanup
-        while True:
-            # Read the request type
-            request = stream.read(1)
-
-            if(request == REQUEST_ARTEFACT):
-                # Read the checksum from the stream
-                checksum = stream.read(32)
-
-                def respond():
-                    print("Received request for artefact {}".format(Checksum.stringify(checksum)))
-
-                    # Check if we have the artefact
-                    has_artefact = self.store.has_artefact(checksum)
-
-                    # Do we have the artefact?
-                    if(has_artefact):
-                        # Yes, request a stream
-                        self.manager.establish_stream(stream.origin, in_reply_to=stream.id).subscribe(lambda x: self.handle_reply_stream(x, checksum))
-
-                threading.Thread(target=respond, name="Tug Response Thread").start()
-
-            elif(request == REQUEST_RELATED_AVAILABLE):
-                # Read the checksum from the stream
-                checksum = stream.read(32)
-
-                def respond():
-                    print("Received request for listing of available related artefacts")
-
-                    # Check if we have the artefact
-                    has_artefact = self.store.has_artefact(checksum)
-
-                    if(has_artefact and len(self.store.get_artefact(checksum).get_related()) > 0):
-                        # Open a reply
-                        self.manager.establish_stream(stream.origin, in_reply_to=stream.id).subscribe(lambda x: self.handle_listing_stream(x, checksum))
-
-                threading.Thread(target=respond, name="Tug Response Thread").start()
-
-
-    @in_thread
-    def handle_reply_stream(self, stream, checksum):
-        print("Established reply stream for artefact {}".format(Checksum.stringify(checksum)))
-
-        # Get the object
-        artefact = self.store.get_artefact(checksum)
-
-        # Get a sendable
-        sendable = artefact.as_sendable()
-
-        # Write the response type anc checksum
-        stream.write(RESPONSE_ARTEFACT + checksum)
-
-        # Send the artefact
-        for chunk in sendable:
-            if(len(chunk) > 0):
-                stream.write(chunk)
-
-        stream.close()
-
-    @in_thread
-    def handle_listing_stream(self, stream, checksum):
-        print("Established reply stream for artefact listing")
-
-        # Prepare list of references
-        references = self.store.get_artefact(checksum).get_related()
-
-        # Get list of checksums we have
-        checksums = set(self.store.get_artefact_checksums())
-
-        # Get a list of available references
-        available_references = [x.checksum for x in references if x.checksum in checksums]
-
-        # Send checksums
-        stream.write(RESPONSE_RELATED_AVAILABLE + struct.pack("!H", len(available_references)) + b"".join(available_references))
-        stream.close()
+        # Keep a dictionary of seeders and leachers by peer
+        self.seeders: Dict[object, Seeder] = {}
+        self.leachers: Dict[object, Leacher] = {}
 
     
-    def retrieve_artefact(self, checksum, storage_policy = Storage.STORAGE_PARTICIPATORY, peers_to_try = 10):
-        # TODO Remove
-        print("Retreive {}".format(Checksum.stringify(checksum)))
+    def __handle_new_stream(self, control_stream: LibPeer2.IngressStream):
+        # Function to handle data stream establishment
+        def data_stream_established(data_stream: LibPeer2.EgressStream):
+            # Create leacher object
+            leacher = Leacher(self.storage, control_stream, data_stream)
 
-        # Save storage policy
-        self.artefact_policy[checksum] = storage_policy
+            # Add to dictionary
+            self.leachers[control_stream.origin] = leacher
 
-        # Create the subject to give to the caller
-        subject = rx.subject.ReplaySubject()
+            # Notify the subject
+            self.new_leacher.on_next(leacher)
 
-        # Do we already have the artefact in storage?
-        if(self.store.has_artefact(checksum)):
-            # Return that instead
-            try:
-                subject.on_next(self.store.get_artefact(checksum))
-            except Exception as e:
-                subject.on_error(e)
-                
-            return subject
+            # Serve the leacher
+            Thread(target=leacher.serve, name="Seeding to leacher").start()
 
-        # Do we already have a subject for this artefact?
-        if(checksum in self.artefact_subjects):
-            # Return that
-            return self.artefact_subjects[checksum]
+        # A leacher is connected, establish a data stream
+        self.__instance_manager.establish_stream(control_stream.origin, in_reply_to=control_stream.id).subscribe(data_stream_established)
 
-        # Save the subject
-        self.artefact_subjects[checksum] = subject
-
-        # Callback for when a stream has been established with a resource peer
-        def on_stream_established(stream):
-            print("Established connection with resource peer")
-            # Subscribe to the stream reply
-            stream.reply.subscribe(self.on_peer_response)
-
-            # Store reference to control stream
-            self.control_streams[stream.target] = stream
-
-            # Request the artefact
-            self.request_artefact(checksum, stream)
-
-        # Callback for when resource peers have been contacted
-        def on_resource_peer(peer, from_cache = False):
-            # Do we already have a connection open with this peer?
-            if(peer in self.control_streams):
-                # Request the artefact
-                print("Already connected to a peer with this resource")
-                self.request_artefact(checksum, self.control_streams[peer])
-            
-            else:    
-                # Establish a stream with the peer
-                print("Establishing connection to resource peer")
-                self.manager.establish_stream(peer).subscribe(on_stream_established)
-
-        # Do we already know peers with this artefact?
-        if(checksum in self.artefact_locations):
-            print("Found peer with {} from cache".format(Checksum.stringify(checksum)))
-            # Try directly
-            for peer in self.artefact_locations[checksum]:
-                on_resource_peer(peer)
-
-        else:
-            print("Searching for peer with {}".format(Checksum.stringify(checksum)))
-            # Find peers claiming to have the artefact
-            self.manager.find_resource_peers(checksum).subscribe(on_resource_peer)
-
-        return subject
+    
+    def discover_seeders_with(self, checksum):
+        # Look for seeders that advertise the specified checksum
+        self.__instance_manager.find_resource_peers(checksum).subscribe(lambda x: self.__handle_seeder(x, checksum))
 
 
-    def request_artefact(self, checksum, stream):
-        # Ask the peer for the artefact
-        stream.write(REQUEST_ARTEFACT + checksum)
+    def __handle_seeder(self, peer, checksum):
+        # Function to handle establishment of the control stream
+        def control_stream_established(control_stream: LibPeer2.EgressStream):
+            # Function to handle establishment of the data stream
+            def data_stream_established(data_stream: LibPeer2.IngressStream):
+                # Create the seeder
+                seeder = Seeder(self.storage, control_stream, data_stream)
 
-        # Also ask peer for a listing of related artefacts
-        stream.write(REQUEST_RELATED_AVAILABLE + checksum)
+                # Add checksum to available set
+                seeder.available.add(checksum)
 
-    @in_thread
-    def on_peer_response(self, stream):
-        # Read the type of reply
-        response_type = stream.read(1)
+                # Add to dictionary
+                self.seeders[control_stream.target] = seeder
 
-        # Are we receiving an artefact?
-        if(response_type == RESPONSE_ARTEFACT):
-            # Read the checksum of the incoming artefact
-            checksum = stream.read(32)
+                # Notify the subject
+                self.new_seeder.on_next(seeder)
 
-            # Do we have a subject for this artefact?
-            if(checksum not in self.artefact_subjects):
-                stream.close()
-                return
+            # Remote peer will establish data stream
+            control_stream.reply.subscribe(data_stream_established)
 
-            # Get the subject
-            subject = self.artefact_subjects[checksum]
+        # Do we already have this peer?
+        if(peer in self.seeders):
+            # Yes, add this checksum to the seeders available set
+            self.seeders[peer].available.add(checksum)
 
-            print("Reading data from resource peer")
-            try:
-                # Create an artefact
-                artefact = ArtefactFactory.deserialise(stream)
+            # Don't establish a new connection
+            return
 
-                # Save the artefact
-                self.store.save_artefact(self.artefact_policy[checksum], artefact)
-
-                # Return the artefact to the subject
-                subject.on_next(artefact)
-                
-            except Exception as e:
-                subject.on_error(e)
-
-        elif(response_type == RESPONSE_RELATED_AVAILABLE):
-            # We are receiving related available artefacts from this peer
-            print("Reading artefact listing")
-            # Read number of items
-            items = struct.unpack("!H", stream.read(2))[0]
-
-            # Add artefact peer
-            for i in range(items):
-                checksum = stream.read(32)
-                self.add_artefact_peer(checksum, stream.origin)
+        # Establish connection with the peer
+        self.__instance_manager.establish_stream(peer).subscribe(control_stream_established)
 
 
-    def add_artefact_peer(self, checksum, peer):
-        if(checksum not in self.artefact_locations):
-            self.artefact_locations[checksum] = set()
-
-        self.artefact_locations[checksum].add(peer)
-        
+    def advertise_checksums(self, checksums):
+        # Advertise as a resource peer using the checksum as the resource identifier
+        self.__instance_manager.resources.update(checksums)
